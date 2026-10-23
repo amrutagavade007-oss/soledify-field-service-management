@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Soledify FieldOps - Technician Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <nav class="side" id="side"></nav>
+  <main class="main">
+    <input id="q" class="search" placeholder="Search by Customer ID, name or site" aria-label="Search visits">
+    <section class="hero" id="hero"></section>
+    <div class="kpis" id="kpis"></div>
+    <div class="grid">
+      <section class="panel"><h2>Assigned visits</h2><div class="chips" id="chips"></div><div id="list"></div></section>
+      <aside class="panel"><h2>Visit status</h2><div id="donut"></div></aside>
+    </div>
+  </main>
+</div>
+<script src="js/mockData.js"></script>
+<script src="js/form-handler.js"></script>
+<script>dash()</script>
+</body>
+</html>
