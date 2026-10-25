@@ -107,7 +107,7 @@ om:{title:'Maintenance survey',steps:[
 };
 /* Soledify technician frontend (no backend needed): survey schema, dashboard, form engine. */
 const PAGE={pre:'pre-visit.html',post:'post-visit.html',om:'o&amp;m.html'};
-const API_BASE = null; // e.g. 'http://localhost:3000' once Member 2's API is ready
+const API_BASE = 'http://localhost:5000'; // e.g. 'http://localhost:3000' once Member 2's API is ready
 const G=id=>document.getElementById(id),$$=(s,r=document)=>[...r.querySelectorAll(s)];
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const LS={g:k=>{try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},s:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},d:k=>{try{localStorage.removeItem(k)}catch(e){}}};
@@ -158,6 +158,7 @@ async function survey(){
  if(!cur){G('root').innerHTML='<h2>Visit not found</h2><p>Open a visit from the dashboard.</p><br><a class="btn" href="dashboard.html">Back to dashboard</a>';return}
  G('ttl').textContent=SV[cur.type].title;net();addEventListener('online',net);addEventListener('offline',net);
  P=SV[cur.type].steps.map(([t,ps])=>({t,ps:ps.map(mk)}));
+ console.log('Survey answer keys:', P.flatMap(s => s.ps.flatMap(pa => pa.c.map(x => x.k))));
  const d=LS.g(dk(cur.id,cur.type));D=d?d.D:{};F={};
  const subs=(LS.g('soledify_submissions')||[]).filter(s=>s.customerId===cur.id&&s.type==='om').length;
  const jobs=[];
@@ -259,14 +260,160 @@ function sum(pa){return pa.c.filter(x=>shown(pa,x)&&x.t!=='cnt').map(x=>{const t
  if(Array.isArray(v))return v.join(', ')||'-';
  return `${x.l&&t!=='a'?x.l+': ':''}${v||'-'}`}).join(' · ')}
 const review=()=>`<p class="mu">Check your answers. Use the step buttons above to correct anything.</p><div class="rv"><table>${P.flatMap(s=>s.ps.filter(vis)).map(pa=>`<tr><td>${esc(pa.l)}</td><td>${esc(sum(pa))}</td></tr>`).join('')}</table></div><p class="mu" id="cf" style="margin-top:10px"></p>`;
-async function send(pl){if(!API_BASE)return{ok:true};const fd=new FormData();fd.append('data',JSON.stringify(pl));for(const k in F)F[k].forEach(f=>fd.append(k,f,f.name));
- return fetch(`${API_BASE}/api/surveys/${cur.id}/submit`,{method:'POST',body:fd})}
+
+
+async function uploadSurveyFiles(visitId, filesByField) {
+    const files = Object.values(filesByField || {}).flat();
+
+    if (files.length === 0) {
+        return { success: true, uploaded_count: 0 };
+    }
+
+    let uploadedCount = 0;
+
+    // Backend accepts up to 5 files per request.
+    for (let i = 0; i < files.length; i += 5) {
+        const batch = files.slice(i, i + 5);
+        const formData = new FormData();
+
+        for (const file of batch) {
+            formData.append('files', file, file.name);
+        }
+
+        formData.append('uploaded_by', '1');
+
+        const response = await fetch(
+            `${API_BASE}/api/visits/${visitId}/files`,
+            {
+                method: 'POST',
+                body: formData
+            }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok || result.success !== true) {
+            throw new Error(result.message || 'File upload failed');
+        }
+
+        uploadedCount += batch.length;
+    }
+
+    return {
+        success: true,
+        uploaded_count: uploadedCount
+    };
+}
+
+
+async function send(pl) {
+    if (!API_BASE) {
+        return { ok: true, success: true, demo: true };
+    }
+
+    if (!cur.visitId) {
+        throw new Error('No backend visit ID is configured.');
+    }
+
+    const answers = Object.entries(pl.answers || {})
+        .filter(([key, value]) => {
+            if (value === undefined || value === null || value === '') {
+                return false;
+            }
+
+            if (/^(photos|videos|bills|before|after|yVideo)_\d+$/.test(key)) {
+                return false;
+            }
+
+            if (typeof value === 'string' && value.startsWith('data:image')) {
+                return false;
+            }
+
+            return true;
+        })
+        .map(([key, value]) => ({
+            question_key: key,
+            question_label: key.replace(/_\d+$/, '').replace(/([A-Z])/g, ' $1').trim(),
+            section_name: 'Site Survey',
+            answer_value: typeof value === 'object'
+                ? JSON.stringify(value)
+                : String(value),
+            answer_type: typeof value === 'number'
+                ? 'number'
+                : typeof value === 'boolean'
+                    ? 'boolean'
+                    : typeof value === 'object'
+                        ? 'json'
+                        : 'text'
+        }));
+
+    // Save survey answers
+    const answersResponse = await fetch(
+        `${API_BASE}/api/visits/${cur.visitId}/answers`,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ answers })
+        }
+    );
+
+    const answersResult = await answersResponse.json();
+
+    if (!answersResponse.ok || answersResult.success !== true) {
+        throw new Error(
+            answersResult.message || 'Could not save survey answers'
+        );
+    }
+    // Upload photos and videos before marking the visit submitted
+    await uploadSurveyFiles(cur.visitId, F);
+    // Update visit status
+    const statusResponse = await fetch(
+        `${API_BASE}/api/visits/${cur.visitId}/status`,
+        {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'Submitted' })
+        }
+    );
+
+    const statusResult = await statusResponse.json();
+
+    if (!statusResponse.ok || statusResult.success !== true) {
+        throw new Error(
+            statusResult.message || 'Could not update visit status'
+        );
+    }
+
+    return {
+        ok: true,
+        success: true,
+        answersResult,
+        statusResult
+    };
+}
+
+
+
 async function submit(){
  for(let i=0;i<P.length;i++)if(vs(i)&&P[i].ps.some(pa=>chk(pa))){step=i;render();valStep(i);return}
  if(!conf){conf=1;G('nx').textContent='Tap again to confirm';G('cf').textContent='Once submitted, this survey goes to the advisor for review.';setTimeout(()=>{conf=0;const b=G('nx');if(b&&!b.disabled)b.textContent='Submit survey'},6000);return}
  G('nx').disabled=true;G('nx').textContent='Submitting…';
  const pl={customerId:cur.id,surveyType:cur.type,technician:cur.tech,status:'Submitted',submittedAt:new Date().toISOString(),answers:D,files:Object.fromEntries(Object.entries(F).filter(([,a])=>a.length).map(([k,a])=>[k,a.map(f=>f.name)]))};
- try{const r=await send(pl);if(!r.ok)throw 0}catch(e){conf=0;G('nx').disabled=false;G('nx').textContent='Submit survey';G('cf').textContent='Could not submit. Your answers are saved as a draft on this device. Try again when you have a signal.';return}
+try {
+    const result = await send(pl);
+
+    if (!result || result.ok !== true || result.success !== true) {
+        throw new Error(result?.message || 'Submission failed');
+    }
+} catch (e) {
+    conf = 0;
+    console.error('Survey submission error:', e);
+    G('nx').disabled = false;
+    G('nx').textContent = 'Submit survey';
+    G('cf').textContent =
+        'Could not submit. Your answers are saved as a draft on this device. Try again when you have a signal.';
+    return;
+}
  const subs=LS.g('soledify_submissions')||[];subs.push({customerId:cur.id,type:cur.type,submittedAt:pl.submittedAt,answers:Object.fromEntries(Object.entries(D).filter(([,v])=>!(typeof v==='string'&&v.startsWith('data:'))))});LS.s('soledify_submissions',subs);
  const st=LS.g('soledify_status')||{};st[cur.id+cur.type]='Submitted';LS.s('soledify_status',st);LS.d(dk(cur.id,cur.type));Object.keys(F).forEach(k=>fdel(fkey(k)));
  const out=JSON.stringify(pl,(k,v)=>typeof v==='string'&&v.startsWith('data:image')?'[signature image]':v,2);

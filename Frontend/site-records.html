@@ -1,0 +1,334 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Site Visit Records | Soledify</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f7fb;
+            color: #1e293b;
+        }
+        header {
+            background: #123b32;
+            color: white;
+            padding: 22px 5%;
+        }
+        header h1 { margin: 0 0 6px; font-size: 25px; }
+        header p { margin: 0; color: #d5e8df; }
+        main { max-width: 1200px; margin: 28px auto; padding: 0 18px; }
+        .panel {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 12px;
+            box-shadow: 0 3px 12px #14213d0d;
+        }
+        .filters {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+            gap: 14px;
+            align-items: end;
+        }
+        label { display: block; font-size: 13px; margin-bottom: 6px; font-weight: bold; }
+        input, select, button {
+            width: 100%;
+            padding: 11px;
+            border: 1px solid #cbd5e1;
+            border-radius: 7px;
+            font-size: 14px;
+        }
+        button { cursor: pointer; border: none; background: #176b50; color: white; font-weight: bold; }
+        button:hover { background: #10543e; }
+        button.secondary { background: #e2e8f0; color: #1e293b; }
+        .visit {
+            border: 1px solid #e2e8f0;
+            padding: 16px;
+            border-radius: 10px;
+            margin-top: 12px;
+        }
+        .visit h3 { margin: 0 0 8px; }
+        .muted { color: #64748b; font-size: 14px; }
+        .status {
+            display: inline-block;
+            background: #dcfce7;
+            color: #166534;
+            padding: 5px 9px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .visit-actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+        .visit-actions button { width: auto; }
+        #details { display: none; }
+        .answer {
+            padding: 11px 0;
+            border-bottom: 1px solid #e2e8f0;
+            overflow-wrap: anywhere;
+        }
+        .answer strong { display: block; margin-bottom: 5px; }
+        .photo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 14px;
+        }
+        .photo-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px; min-width: 0; }
+        .photo-card img, .photo-card video {
+            width: 100%; height: 150px; object-fit: contain; background: #f1f5f9;
+        }
+        .photo-card a { display: block; margin-top: 8px; overflow-wrap: anywhere; font-size: 13px; }
+        .message { padding: 12px; border-radius: 8px; background: #eff6ff; margin-bottom: 12px; }
+        .error { background: #fee2e2; color: #991b1b; }
+        @media (max-width: 600px) {
+            header h1 { font-size: 21px; }
+            main { margin-top: 16px; padding: 0 12px; }
+            .panel { padding: 15px; }
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>Soledify | Site Visit Records</h1>
+    <p>Search site visits, review survey answers, and view uploaded evidence.</p>
+</header>
+
+<main>
+    <section class="panel">
+        <h2>Search and filter</h2>
+        <form id="filterForm" class="filters">
+            <div>
+                <label for="siteId">Site ID</label>
+                <input id="siteId" type="number" min="1" placeholder="e.g. 1">
+            </div>
+            <div>
+                <label for="visitType">Visit type</label>
+                <select id="visitType">
+                    <option value="">All types</option>
+                    <option value="pre_installation">Pre-installation</option>
+                    <option value="post_installation">Post-installation</option>
+                    <option value="maintenance">Maintenance</option>
+                </select>
+            </div>
+            <div>
+                <label for="status">Status</label>
+                <select id="status">
+                    <option value="">All statuses</option>
+                    <option>Scheduled</option>
+                    <option>In Progress</option>
+                    <option>Submitted</option>
+                    <option>Approved</option>
+                    <option>Returned</option>
+                    <option>Closed</option>
+                </select>
+            </div>
+            <div>
+                <label for="fromDate">From date</label>
+                <input id="fromDate" type="date">
+            </div>
+            <div>
+                <label for="toDate">To date</label>
+                <input id="toDate" type="date">
+            </div>
+            <div><button type="submit">Search records</button></div>
+        </form>
+    </section>
+
+    <div id="message" class="message" role="status">Loading site visit records...</div>
+
+    <section class="panel">
+        <h2>Site visits</h2>
+        <div id="records"></div>
+    </section>
+
+    <section class="panel" id="details">
+        <h2 id="detailsTitle">Visit details</h2>
+        <h3>Survey answers</h3>
+        <div id="answers"></div>
+        <h3 style="margin-top:25px">Photos and videos</h3>
+        <div id="files" class="photo-grid"></div>
+    </section>
+</main>
+
+<script>
+    const API_BASE = "http://localhost:5000";
+
+    const messageBox = document.getElementById("message");
+    const recordsBox = document.getElementById("records");
+    const detailsPanel = document.getElementById("details");
+
+    function showMessage(text, isError = false) {
+        messageBox.textContent = text;
+        messageBox.className = isError ? "message error" : "message";
+    }
+
+    function escapeHTML(value) {
+        return String(value ?? "").replace(/[&<>"']/g, char => ({
+            "&": "&amp;", "<": "&lt;", ">": "&gt;",
+            '"': "&quot;", "'": "&#39;"
+        })[char]);
+    }
+
+    function formatDate(value) {
+        if (!value) return "—";
+        return new Date(value).toLocaleString();
+    }
+
+    async function fetchJSON(url) {
+        const response = await fetch(url);
+        const data = await response.json();
+        if (!response.ok || data.success !== true) {
+            throw new Error(data.message || "Request failed");
+        }
+        return data;
+    }
+
+    async function loadRecords(event) {
+        if (event) event.preventDefault();
+
+        detailsPanel.style.display = "none";
+        recordsBox.replaceChildren();
+        showMessage("Loading records...");
+
+        const params = new URLSearchParams();
+        const fields = {
+            site_id: document.getElementById("siteId").value.trim(),
+            visit_type: document.getElementById("visitType").value,
+            status: document.getElementById("status").value,
+            from_date: document.getElementById("fromDate").value,
+            to_date: document.getElementById("toDate").value
+        };
+
+        for (const [key, value] of Object.entries(fields)) {
+            if (value) params.set(key, value);
+        }
+
+        try {
+            const result = await fetchJSON(
+                `${API_BASE}/api/visits/records?${params.toString()}`
+            );
+
+            showMessage(`${result.count} site visit record(s) found.`);
+
+            if (!result.count) {
+                recordsBox.textContent = "No records match these filters.";
+                return;
+            }
+
+            result.data.forEach(visit => {
+                const card = document.createElement("article");
+                card.className = "visit";
+                card.innerHTML = `
+                    <h3>${escapeHTML(visit.project_name || "Site visit")}
+                        <span class="status">${escapeHTML(visit.status)}</span>
+                    </h3>
+                    <p class="muted">
+                        Visit ID: ${escapeHTML(visit.visit_id)} |
+                        Site ID: ${escapeHTML(visit.site_id)}
+                    </p>
+                    <p><strong>Customer:</strong> ${escapeHTML(visit.customer_name || "—")}</p>
+                    <p><strong>Address:</strong> ${escapeHTML(visit.site_address || "—")},
+                        ${escapeHTML(visit.city || "")}</p>
+                    <p><strong>Type:</strong> ${escapeHTML(visit.visit_type)}</p>
+                    <p><strong>Scheduled:</strong> ${escapeHTML(formatDate(visit.scheduled_date))}</p>
+                    <div class="visit-actions">
+                        <button type="button" data-visit-id="${Number(visit.visit_id)}">
+                            View answers and evidence
+                        </button>
+                    </div>
+                `;
+                recordsBox.appendChild(card);
+            });
+
+            recordsBox.querySelectorAll("button[data-visit-id]").forEach(button => {
+                button.addEventListener("click", () => {
+                    loadVisitDetails(Number(button.dataset.visitId));
+                });
+            });
+        } catch (error) {
+            showMessage(
+                `Could not load records: ${error.message}. Check that the backend is running.`,
+                true
+            );
+        }
+    }
+
+    async function loadVisitDetails(visitId) {
+        detailsPanel.style.display = "block";
+        document.getElementById("detailsTitle").textContent = `Visit ${visitId} details`;
+        document.getElementById("answers").textContent = "Loading answers...";
+        document.getElementById("files").textContent = "Loading files...";
+        detailsPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+
+        try {
+            const [answerResult, fileResult] = await Promise.all([
+                fetchJSON(`${API_BASE}/api/visits/${visitId}/answers`),
+                fetchJSON(`${API_BASE}/api/visits/${visitId}/files`)
+            ]);
+
+            const answersBox = document.getElementById("answers");
+            answersBox.replaceChildren();
+
+            if (!answerResult.data.length) {
+                answersBox.textContent = "No survey answers saved.";
+            } else {
+                answerResult.data.forEach(answer => {
+                    const item = document.createElement("div");
+                    item.className = "answer";
+                    item.innerHTML = `
+                        <strong>${escapeHTML(answer.question_label || answer.question_key)}</strong>
+                        <span>${escapeHTML(answer.answer_value)}</span>
+                        <div class="muted">${escapeHTML(answer.section_name || "")}</div>
+                    `;
+                    answersBox.appendChild(item);
+                });
+            }
+
+            const filesBox = document.getElementById("files");
+            filesBox.replaceChildren();
+
+            if (!fileResult.data.length) {
+                filesBox.textContent = "No photos or videos uploaded.";
+            } else {
+                fileResult.data.forEach(file => {
+                    const card = document.createElement("div");
+                    card.className = "photo-card";
+
+                    const url = `${API_BASE}/api/visits/files/${Number(file.file_id)}`;
+                    const media = document.createElement(
+                        file.mime_type && file.mime_type.startsWith("video/")
+                            ? "video" : "img"
+                    );
+                    media.src = url;
+                    if (media.tagName === "VIDEO") {
+                        media.controls = true;
+                    } else {
+                        media.alt = file.original_name || "Site evidence";
+                        media.loading = "lazy";
+                    }
+
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.target = "_blank";
+                    link.rel = "noopener noreferrer";
+                    link.textContent = file.original_name || `File ${file.file_id}`;
+
+                    card.append(media, link);
+                    filesBox.appendChild(card);
+                });
+            }
+        } catch (error) {
+            document.getElementById("answers").textContent =
+                `Unable to load visit details: ${error.message}`;
+            document.getElementById("files").replaceChildren();
+        }
+    }
+
+    document.getElementById("filterForm").addEventListener("submit", loadRecords);
+    loadRecords();
+</script>
+</body>
+</html>
